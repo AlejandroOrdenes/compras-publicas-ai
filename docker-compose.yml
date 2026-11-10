@@ -1,0 +1,22 @@
+# Servicios de infraestructura local.
+# Por ahora solo PostgreSQL con la extensión pgvector (para guardar embeddings).
+services:
+  db:
+    image: pgvector/pgvector:pg16      # Postgres 16 con pgvector ya compilado
+    container_name: cpai-db
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    ports:
+      - "5433:5432"                    # 5433 en tu PC -> 5432 dentro del contenedor
+    volumes:
+      - pgdata:/var/lib/postgresql/data          # los datos sobreviven si apagas el contenedor
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro   # se ejecuta solo la 1ra vez
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      retries: 10
+
+volumes:
+  pgdata:
