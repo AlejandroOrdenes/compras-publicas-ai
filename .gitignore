@@ -5,3 +5,7 @@ __pycache__/
 .pytest_cache/
 data/normativa/*.pdf
 data/normativa/*.xml
+
+# Notas personales de estudio (no se publican)
+docs/diario-tecnico.md
+docs/aprendizajes.md
