@@ -17,48 +17,25 @@ CARPETA = ROOT / "data" / "normativa"
 NS = "{http://www.leychile.cl/esquemas}"
 
 
-# ---------------------------------------------------------------------------
-# TU TAREA: implementar parsear(ruta)
-#
-# Debe devolver una lista de diccionarios, uno por artículo:
-#   [{"norma": "ley_19886", "articulo": "6", "transitorio": False,
-#     "texto": "Artículo 6º.- Las bases de licitación deberán ..."}, ...]
-#
-# Cómo viene el XML (simplificado):
-#   <Norma>
-#     <EstructurasFuncionales>
-#       <EstructuraFuncional tipoParte="Capítulo" ...>        <- contenedor
-#         <EstructuraFuncional tipoParte="Artículo"           <- lo que buscas
-#                              transitorio="no transitorio"
-#                              derogado="no derogado">
-#           <Texto> Artículo 6º.- Las bases ...</Texto>
-#           <Metadatos>
-#             <NombreParte presente="si">6</NombreParte>     <- número limpio
-#           </Metadatos>
-#
-# Pistas:
-#   1. ET.parse(ruta).getroot() entrega la raíz <Norma>.
-#   2. Los artículos están ANIDADOS dentro de capítulos y párrafos, a distinta
-#      profundidad. raiz.iter(NS + "EstructuraFuncional") los recorre todos,
-#      sin importar el nivel (find/findall solo miran un nivel).
-#   3. Atributos: elem.get("tipoParte"). Hijo directo: elem.find(NS + "Texto").
-#      Texto dentro de una etiqueta: .text (puede ser None, ojo).
-#   4. Quédate solo con tipoParte == "Artículo".
-#   5. Limpia el texto: viene con saltos de línea cada ~60 caracteres
-#      (el XML imita el ancho del Diario Oficial). " ".join(texto.split())
-#      junta todo en una línea con espacios simples.
-#
-# Casos raros que vas a encontrar (decide qué hacer y por qué):
-#   - Números no estándar: "1°", "13 bis", "primero", "Segundo".
-#   - Transitorios: la ley tiene 11, el reglamento 5. ¿Los incluyes? ¿Cómo los
-#     distingues, si el reglamento tiene un "Artículo 1" normal Y uno transitorio?
-#   - Derogados: hoy hay 0, pero el XML lo marca (derogado="derogado"). ¿Qué
-#     debería pasar si en una versión futura aparecen?
-#   - Artículos muy largos: ¿hay alguno que sea demasiado largo para un solo
-#     chunk? (mide len(texto) y mira el máximo)
-# ---------------------------------------------------------------------------
-
 def parsear(ruta: Path) -> list[dict]:
+    """Devuelve un diccionario por artículo de la norma.
+
+    Estructura del XML (simplificada):
+        <EstructuraFuncional tipoParte="Capítulo">         contenedor, se omite
+          <EstructuraFuncional tipoParte="Artículo" transitorio="...">
+            <Texto>Artículo 6º.- Las bases ...</Texto>
+            <Metadatos><NombreParte>6</NombreParte></Metadatos>
+
+    Decisiones:
+    - Los artículos están anidados a distinta profundidad (capítulos, párrafos),
+      por eso se recorre con iter() y se filtra por tipoParte.
+    - Los transitorios se incluyen pero se marcan: comparten numeración con los
+      permanentes (hay dos "Artículo 1") y no deben confundirse al citar.
+    - El texto se normaliza a una línea: el XML trae saltos cada ~60 caracteres.
+
+    Pendiente: normalizar números ("4°", "primero"), subdividir artículos muy
+    largos (> 4.000 caracteres) y definir qué hacer con artículos derogados.
+    """
     raiz = ET.parse(ruta).getroot()
     resultado = []
     for art in raiz.iter(NS + "EstructuraFuncional"):
