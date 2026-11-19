@@ -4,7 +4,11 @@ Ejecutar desde la carpeta backend, con el venv activo y Docker corriendo:
     python -m scripts.indexar_normativa
 
 Requiere haber corrido antes: python -m scripts.descargar_normativa
-Se puede volver a ejecutar: reemplaza el contenido anterior de la tabla.
+Se puede volver a ejecutar: borra y vuelve a crear la tabla.
+
+v2: los artículos largos se dividen en trozos (scripts/dividir_articulos.py).
+Cada trozo es una fila; la columna `parte` dice qué trozo es (1, 2, 3...).
+La versión anterior (un artículo = una fila) quedó guardada en `normativa_v1`.
 """
 import time
 
@@ -12,6 +16,7 @@ import psycopg
 import voyageai
 
 from app.config import settings
+from scripts.dividir_articulos import dividir
 from scripts.parsear_normativa import CARPETA, parsear
 
 MODELO = "voyage-4"
@@ -20,10 +25,11 @@ TAMANO_LOTE = 10     # fichas por llamada a Voyage
 MAX_INTENTOS = 5
 
 CREAR_TABLA = f"""
-CREATE TABLE IF NOT EXISTS normativa (
+CREATE TABLE normativa (
     id          SERIAL PRIMARY KEY,
     norma       TEXT NOT NULL,
     articulo    TEXT NOT NULL,
+    parte       INTEGER NOT NULL,
     transitorio BOOLEAN NOT NULL,
     texto       TEXT NOT NULL,
     embedding   VECTOR({DIMENSIONES}) NOT NULL
@@ -44,10 +50,16 @@ def embeber_lote(vo: voyageai.Client, textos: list[str]) -> list[list[float]]:
 
 
 def main():
-    fichas = []
+    articulos = []
     for ruta in sorted(CARPETA.glob("*.xml")):
-        fichas += parsear(ruta)
-    print(f"{len(fichas)} artículos para indexar")
+        articulos += parsear(ruta)
+
+    # Cada artículo se convierte en 1 o más fichas (una por trozo).
+    fichas = []
+    for art in articulos:
+        for numero, trozo in enumerate(dividir(art["texto"]), start=1):
+            fichas.append({**art, "texto": trozo, "parte": numero})
+    print(f"{len(articulos)} artículos → {len(fichas)} fichas para indexar")
 
     # 1) Calcular TODOS los embeddings antes de tocar la base: si Voyage falla a
     #    mitad de camino, la tabla queda como estaba (no a medio llenar).
@@ -59,21 +71,22 @@ def main():
         print(f"  embeddings: {len(embeddings)}/{len(fichas)}")
 
     # 2) Guardar todo en una sola transacción: o entra completo, o no entra nada.
+    #    Se borra la tabla entera (no solo las filas) porque cambió su forma.
     with psycopg.connect(settings.database_url) as conn:
+        conn.execute("DROP TABLE IF EXISTS normativa")
         conn.execute(CREAR_TABLA)
-        conn.execute("DELETE FROM normativa")
         with conn.cursor() as cur:
             cur.executemany(
-                "INSERT INTO normativa (norma, articulo, transitorio, texto, embedding)"
-                " VALUES (%s, %s, %s, %s, %s::vector)",
+                "INSERT INTO normativa (norma, articulo, parte, transitorio, texto, embedding)"
+                " VALUES (%s, %s, %s, %s, %s, %s::vector)",
                 [
-                    (f["norma"], f["articulo"], f["transitorio"], f["texto"], str(e))
+                    (f["norma"], f["articulo"], f["parte"], f["transitorio"], f["texto"], str(e))
                     for f, e in zip(fichas, embeddings)
                 ],
             )
         total = conn.execute("SELECT count(*) FROM normativa").fetchone()[0]
 
-    print(f"OK  {total} artículos guardados en la tabla normativa")
+    print(f"OK  {total} fichas guardadas en la tabla normativa")
 
 
 if __name__ == "__main__":
