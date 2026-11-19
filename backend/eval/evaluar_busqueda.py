@@ -3,64 +3,53 @@
 Ejecutar desde la carpeta backend, con el venv activo y Docker corriendo:
     python -m eval.evaluar_busqueda
 
-Compara dos índices con las MISMAS preguntas:
-    normativa_v1 → un artículo = una fila
-    normativa    → v2, artículos largos divididos en trozos
+Compara variantes del buscador con las MISMAS preguntas:
+    v1                → un artículo = una fila (tabla normativa_v1)
+    v2                → artículos largos divididos en trozos
+    v2 dedup          → + mejor trozo por artículo
+    v2 dedup + reesc. → + búsqueda con la pregunta reescrita por Haiku (lo que usa el asistente)
 
-Métricas (sobre los 5 primeros resultados de cada pregunta):
+Métricas (sobre los 5 artículos que recibiría Claude):
     acierto   → ¿llegó al menos UNO de los artículos esperados? (sí/no)
     cobertura → de los artículos esperados, ¿qué fracción llegó? (0 a 1)
-Solo usa Voyage (para convertir las preguntas en vectores), no Claude.
+
+Costo por corrida: 2 llamadas a Voyage (~1.000 tokens, capa gratis) y
+36 llamadas a Haiku (~US$0,002). Usa las mismas funciones que buscar_normativa.py.
 """
 import json
 from pathlib import Path
 
 import psycopg
-import voyageai
 
 from app.config import settings
-from scripts.buscar_normativa import CANDIDATOS, CANTIDAD, deduplicar
-from scripts.indexar_normativa import MODELO
+from scripts.buscar_normativa import CANDIDATOS, CANTIDAD, candidatos, deduplicar, fusionar, vectorizar
+from scripts.reescribir_pregunta import reescribir
 
 PAUTA = Path(__file__).parent / "preguntas.json"
 
-# Cada variante: nombre → (tabla, ¿deduplicar?)
-INDICES = {
-    "v1": ("normativa_v1", False),
-    "v2": ("normativa", False),
-    "v2 dedup": ("normativa", True),
+# Cada variante: nombre → (tabla, ¿deduplicar?, ¿reescribir?)
+VARIANTES = {
+    "v1": ("normativa_v1", False, False),
+    "v2": ("normativa", False, False),
+    "v2 dedup": ("normativa", True, False),
+    "+ reesc.": ("normativa", True, True),
 }
 
-# El nombre de la tabla no puede ir como parámetro %s (los parámetros son
-# solo para VALORES), por eso se arma con .format() desde INDICES, que es una
-# lista fija escrita por nosotros (nunca texto que venga de un usuario).
-BUSCAR = """
-SELECT norma, articulo, transitorio
-FROM {tabla}
-ORDER BY embedding <=> %s::vector
-LIMIT %s
-"""
 
-
-def vectorizar(preguntas: list[str]) -> list[str]:
-    """Convierte todas las preguntas en vectores (una sola llamada a Voyage)."""
-    vo = voyageai.Client(api_key=settings.voyage_api_key)
-    vectores = vo.embed(preguntas, model=MODELO, input_type="query").embeddings
-    return [str(v) for v in vectores]
-
-
-def evaluar(conn, tabla: str, dedup: bool, pauta: list[dict], vectores: list[str]) -> list[dict]:
+def evaluar(conn, tabla, dedup, vectores_originales, vectores_reescritos, pauta) -> list[dict]:
     """Hace cada pregunta al índice y anota acierto y cobertura."""
     resultados = []
-    for item, vector in zip(pauta, vectores):
+    for i, item in enumerate(pauta):
         pedir = CANDIDATOS if dedup else CANTIDAD
-        filas = conn.execute(BUSCAR.format(tabla=tabla), (vector, pedir)).fetchall()
-        if dedup:
-            filas = deduplicar(filas, CANTIDAD)
+        rankings = [candidatos(conn, vectores_originales[i], pedir, tabla)]
+        if vectores_reescritos:
+            rankings.append(candidatos(conn, vectores_reescritos[i], pedir, tabla))
+        filas = fusionar(rankings)
+        filas = deduplicar(filas, CANTIDAD) if dedup else filas[:CANTIDAD]
+
         # Los esperados son todos artículos permanentes: un transitorio con el
         # mismo número (p. ej. "1") no debe contar como acierto.
-        encontrados = {(norma, articulo) for norma, articulo, transitorio in filas
-                       if not transitorio}
+        encontrados = {(f[0], f[1]) for f in filas if not f[2]}
         esperados = {tuple(e) for e in item["esperados"]}
         llegaron = esperados & encontrados   # intersección: los que están en ambos
         resultados.append({
@@ -68,7 +57,7 @@ def evaluar(conn, tabla: str, dedup: bool, pauta: list[dict], vectores: list[str
             "estilo": item["estilo"],
             "acierto": len(llegaron) > 0,
             "cobertura": len(llegaron) / len(esperados),
-            "distintos": len(encontrados),   # artículos distintos en el top 5
+            "distintos": len({f[:3] for f in filas}),   # artículos distintos entre los 5
         })
     return resultados
 
@@ -84,24 +73,32 @@ def resumen(resultados: list[dict]) -> str:
 
 def main():
     pauta = json.loads(PAUTA.read_text(encoding="utf-8"))
-    vectores = vectorizar([item["pregunta"] for item in pauta])
+    preguntas = [item["pregunta"] for item in pauta]
+
+    print("Reescribiendo las preguntas con Haiku...")
+    reescritas = [reescribir(p) for p in preguntas]
+
+    # 2 llamadas a Voyage en total (una por lista): cuida el límite por minuto.
+    vectores_originales = vectorizar(preguntas)
+    vectores_reescritos = vectorizar(reescritas)
 
     todos = {}
     with psycopg.connect(settings.database_url) as conn:
-        for nombre, (tabla, dedup) in INDICES.items():
-            todos[nombre] = evaluar(conn, tabla, dedup, pauta, vectores)
+        for nombre, (tabla, dedup, con_reescritura) in VARIANTES.items():
+            todos[nombre] = evaluar(conn, tabla, dedup, vectores_originales,
+                                    vectores_reescritos if con_reescritura else None, pauta)
 
-    # Detalle: una fila por pregunta, ✔/✘ para cada índice.
-    print(f"{'#':>3}  {'estilo':<10}" + "".join(f"{n:>10}" for n in INDICES) + "  pregunta")
+    # Detalle: una fila por pregunta, ✔/✘ y cobertura para cada variante.
+    print(f"\n{'#':>3}  {'estilo':<10}" + "".join(f"{n:>10}" for n in VARIANTES) + "  pregunta")
     for i, item in enumerate(pauta):
         marcas = "".join(
             f"{('✔' if todos[n][i]['acierto'] else '✘') + ' ' + format(todos[n][i]['cobertura'], '.0%'):>10}"
-            for n in INDICES
+            for n in VARIANTES
         )
         print(f"{item['id']:>3}  {item['estilo']:<10}{marcas}  {item['pregunta'][:60]}")
 
     # Resumen: total y por estilo de pregunta.
-    for nombre in INDICES:
+    for nombre in VARIANTES:
         print(f"\n{nombre}")
         print(f"  total      {resumen(todos[nombre])}")
         for estilo in ("legal", "cotidiano"):

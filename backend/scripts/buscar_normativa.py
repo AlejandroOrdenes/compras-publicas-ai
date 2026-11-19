@@ -4,6 +4,14 @@ Ejecutar desde la carpeta backend, con el venv activo y Docker corriendo:
     python -m scripts.buscar_normativa "¿cuándo puedo comprar sin licitar?"
 
 Requiere haber corrido antes: python -m scripts.indexar_normativa
+
+Pasos de buscar():
+    1. reescribir  → Haiku traduce la pregunta al vocabulario legal (opcional)
+    2. vectorizar  → Voyage convierte original + reescrita en vectores (1 llamada)
+    3. candidatos  → pgvector trae los 15 trozos más parecidos a cada vector
+    4. fusionar    → mezcla los rankings con RRF
+    5. deduplicar  → deja el mejor trozo de cada artículo, hasta 5 artículos
+Medido con eval/evaluar_busqueda.py (cobertura): 85% sin reescribir → 87% con.
 """
 import sys
 
@@ -12,18 +20,51 @@ import voyageai
 
 from app.config import settings
 from scripts.indexar_normativa import MODELO
+from scripts.reescribir_pregunta import reescribir as reescribir_con_haiku
 
 CANTIDAD = 5       # artículos distintos que se devuelven
-CANDIDATOS = 15    # trozos que se piden a la base antes de deduplicar
+CANDIDATOS = 15    # trozos que se piden a la base por cada búsqueda
+RRF_K = 60         # constante estándar de RRF (suaviza la diferencia entre puestos)
 
 # <=> es el operador de pgvector para la "distancia coseno":
 # 0 = mismo significado, 2 = opuesto. Similitud = 1 - distancia.
+# El nombre de la tabla va con .format() porque %s solo sirve para VALORES;
+# solo se usa con nombres fijos escritos en el código, nunca con texto del usuario.
 BUSCAR = """
 SELECT norma, articulo, transitorio, texto, 1 - (embedding <=> %s::vector) AS similitud
-FROM normativa
+FROM {tabla}
 ORDER BY embedding <=> %s::vector
 LIMIT %s
 """
+
+
+def vectorizar(textos: list[str]) -> list[str]:
+    """Convierte textos en vectores con UNA sola llamada a Voyage."""
+    vo = voyageai.Client(api_key=settings.voyage_api_key)
+    return [str(v) for v in vo.embed(textos, model=MODELO, input_type="query").embeddings]
+
+
+def candidatos(conn, vector: str, cantidad: int = CANDIDATOS, tabla: str = "normativa") -> list[tuple]:
+    """Los `cantidad` trozos más parecidos a un vector, del más al menos parecido."""
+    return conn.execute(BUSCAR.format(tabla=tabla), (vector, vector, cantidad)).fetchall()
+
+
+def fusionar(rankings: list[list[tuple]]) -> list[tuple]:
+    """Mezcla varios rankings con RRF (Reciprocal Rank Fusion).
+
+    Cada trozo suma 1 / (RRF_K + puesto) por cada ranking en que aparece:
+    estar arriba suma más, y aparecer en los dos rankings suma doble.
+    Con un solo ranking, devuelve el mismo orden.
+    """
+    puntaje = {}
+    fila_de = {}
+    for ranking in rankings:
+        for puesto, fila in enumerate(ranking, start=1):
+            clave = fila[:4]                  # (norma, articulo, transitorio, texto) = un trozo
+            puntaje[clave] = puntaje.get(clave, 0) + 1 / (RRF_K + puesto)
+            fila_de.setdefault(clave, fila)   # guarda la primera fila vista de ese trozo
+    ordenadas = sorted(puntaje, key=puntaje.get, reverse=True)
+    return [fila_de[clave] for clave in ordenadas]
 
 
 def deduplicar(filas: list[tuple], cantidad: int) -> list[tuple]:
@@ -46,18 +87,17 @@ def deduplicar(filas: list[tuple], cantidad: int) -> list[tuple]:
     return elegidos
 
 
-def buscar(pregunta: str, cantidad: int = CANTIDAD) -> list[tuple]:
-    """Devuelve los `cantidad` artículos distintos más parecidos a la pregunta.
+def buscar(pregunta: str, cantidad: int = CANTIDAD, reescribir: bool = True) -> list[tuple]:
+    """Devuelve los `cantidad` artículos distintos más relevantes para la pregunta."""
+    textos = [pregunta]
+    if reescribir:
+        textos.append(reescribir_con_haiku(pregunta))
+    vectores = vectorizar(textos)
 
-    Como los artículos largos están divididos en trozos, se piden más trozos
-    (CANDIDATOS) y se deja solo el mejor trozo de cada artículo. Medido con
-    eval/evaluar_busqueda.py: cobertura 84% → 85% y 5 artículos distintos (antes 4,4).
-    """
-    vo = voyageai.Client(api_key=settings.voyage_api_key)
-    vector = str(vo.embed([pregunta], model=MODELO, input_type="query").embeddings[0])
+    pedir = max(CANDIDATOS, cantidad * 3)
     with psycopg.connect(settings.database_url) as conn:
-        filas = conn.execute(BUSCAR, (vector, vector, max(CANDIDATOS, cantidad * 3))).fetchall()
-    return deduplicar(filas, cantidad)
+        rankings = [candidatos(conn, v, pedir) for v in vectores]
+    return deduplicar(fusionar(rankings), cantidad)
 
 
 def main():
