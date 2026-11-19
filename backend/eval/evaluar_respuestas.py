@@ -54,11 +54,17 @@ def normalizar(articulo: str) -> str:
     return " ".join(sin_tildes.replace("°", " ").replace("º", " ").upper().split())
 
 
+# Desde aquí en adelante, los números son partes del artículo, no artículos:
+# "art. 154 N° 7, 8 y 9" → el 8 y el 9 son numerales del 154 (falso "inventa" visto en la pregunta 16).
+SUBDIVISION = re.compile(r"\b(?:N[°º]|n[°º]|numerales?|letras?|literal(?:es)?|incisos?)", re.IGNORECASE)
+
+
 def leer_citas(texto: str) -> set[tuple[str, str]]:
     """Devuelve las citas de la respuesta como {(norma, articulo_normalizado)}."""
     citas = set()
     for norma_texto, lista in CITA.findall(texto):
         norma = "ley_19886" if norma_texto.lower().startswith("ley") else "reglamento_dto_661"
+        lista = SUBDIVISION.split(lista)[0]               # "154 N° 7, 8 y 9" → "154 "
         for pedazo in re.split(r",\s*|\s+y\s+", lista):   # "71 y 72" → ["71", "72"]
             numero = NUMERO.match(pedazo.strip())
             if numero:                                    # ignora "inciso 2", "letra b)", etc.
