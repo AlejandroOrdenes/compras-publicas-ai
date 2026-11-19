@@ -11,6 +11,7 @@ Pasos de buscar():
     3. candidatos  → pgvector trae los 15 trozos más parecidos a cada vector
     4. fusionar    → mezcla los rankings con RRF
     5. deduplicar  → deja el mejor trozo de cada artículo, hasta 5 artículos
+    6. completar   → cambia cada trozo por su artículo entero (para Claude)
 Medido con eval/evaluar_busqueda.py (cobertura): 85% sin reescribir → 87% con.
 """
 import sys
@@ -87,8 +88,39 @@ def deduplicar(filas: list[tuple], cantidad: int) -> list[tuple]:
     return elegidos
 
 
-def buscar(pregunta: str, cantidad: int = CANTIDAD, reescribir: bool = True) -> list[tuple]:
-    """Devuelve los `cantidad` artículos distintos más relevantes para la pregunta."""
+# Rearma el artículo completo uniendo sus trozos en orden. Desde el 2º trozo,
+# cada uno empieza con "encabezado (...) ": se corta hasta después de " (...) "
+# (7 caracteres) para no repetir el encabezado. Verificado: los 325 artículos
+# quedan idénticos al texto original del XML.
+ARTICULO_COMPLETO = """
+SELECT string_agg(
+         CASE WHEN parte = 1 THEN texto
+              ELSE substr(texto, strpos(texto, ' (...) ') + 7) END,
+         ' ' ORDER BY parte)
+FROM normativa
+WHERE norma = %s AND articulo = %s AND transitorio = %s
+"""
+
+
+def completar(conn, filas: list[tuple]) -> list[tuple]:
+    """Reemplaza el texto de cada trozo por el de su artículo completo ("small-to-big").
+
+    Se BUSCA con trozos chicos (más precisos), pero a Claude se le ENTREGA el
+    artículo entero: así no recibe listas cortadas por la mitad.
+    """
+    completas = []
+    for norma, articulo, transitorio, _trozo, similitud in filas:
+        texto = conn.execute(ARTICULO_COMPLETO, (norma, articulo, transitorio)).fetchone()[0]
+        completas.append((norma, articulo, transitorio, texto, similitud))
+    return completas
+
+
+def buscar(pregunta: str, cantidad: int = CANTIDAD, reescribir: bool = True,
+           completo: bool = True) -> list[tuple]:
+    """Devuelve los `cantidad` artículos distintos más relevantes para la pregunta.
+
+    completo=True → cada artículo viene entero; False → solo su mejor trozo.
+    """
     textos = [pregunta]
     if reescribir:
         textos.append(reescribir_con_haiku(pregunta))
@@ -97,7 +129,8 @@ def buscar(pregunta: str, cantidad: int = CANTIDAD, reescribir: bool = True) -> 
     pedir = max(CANDIDATOS, cantidad * 3)
     with psycopg.connect(settings.database_url) as conn:
         rankings = [candidatos(conn, v, pedir) for v in vectores]
-    return deduplicar(fusionar(rankings), cantidad)
+        elegidos = deduplicar(fusionar(rankings), cantidad)
+        return completar(conn, elegidos) if completo else elegidos
 
 
 def main():

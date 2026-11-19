@@ -38,7 +38,15 @@ def armar_contexto(articulos: list[tuple]) -> str:
     return "\n\n".join(bloques)
 
 
-def preguntar(pregunta: str) -> str:
+def responder(pregunta: str) -> dict:
+    """Busca los artículos, se los pasa a Claude y devuelve todo lo que pasó.
+
+    Devuelve un diccionario (lo usan preguntar() y eval/evaluar_respuestas.py):
+        texto         → la respuesta de Claude
+        articulos     → las filas que recibió Claude (norma, articulo, transitorio, texto, similitud)
+        rechazo       → True si un filtro de seguridad no dejó responder
+        tokens_entrada, tokens_salida
+    """
     articulos = buscar(pregunta, CANTIDAD_ARTICULOS)
 
     client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
@@ -55,11 +63,22 @@ def preguntar(pregunta: str) -> str:
         fallbacks="default",
     )
 
-    if respuesta.stop_reason == "refusal":
+    rechazo = respuesta.stop_reason == "refusal"
+    return {
+        "texto": "" if rechazo else "".join(b.text for b in respuesta.content if b.type == "text"),
+        "articulos": articulos,
+        "rechazo": rechazo,
+        "tokens_entrada": respuesta.usage.input_tokens,
+        "tokens_salida": respuesta.usage.output_tokens,
+    }
+
+
+def preguntar(pregunta: str) -> str:
+    """Versión para personas: la respuesta como texto, con los tokens al final."""
+    r = responder(pregunta)
+    if r["rechazo"]:
         return "Claude no pudo responder esta pregunta."
-    texto = "".join(b.text for b in respuesta.content if b.type == "text")
-    uso = respuesta.usage
-    return f"{texto}\n\n[tokens: {uso.input_tokens} de entrada, {uso.output_tokens} de salida]"
+    return f"{r['texto']}\n\n[tokens: {r['tokens_entrada']} de entrada, {r['tokens_salida']} de salida]"
 
 
 def main():
