@@ -118,10 +118,10 @@ def buscar_licitaciones(texto=None, region=None, estado=None, organismo=None,
         filas = conn.execute(BUSCAR_LICITACIONES, parametros).fetchall()
 
     resultados = []
-    for codigo, nombre, estado_, organismo_, comuna, region_, monto, moneda, publicada, cierre, items in filas:
+    for codigo_, nombre, estado_, organismo_, comuna, region_, monto, moneda, publicada, cierre, items in filas:
         proveedores = sorted({i["proveedor"] for i in items if i.get("proveedor")})
         resultados.append({
-            "codigo": codigo,
+            "codigo": codigo_,
             "nombre": nombre,
             "estado": estado_,
             "organismo": organismo_,
@@ -131,7 +131,7 @@ def buscar_licitaciones(texto=None, region=None, estado=None, organismo=None,
             "fecha_publicacion": publicada.date().isoformat() if publicada else None,
             "fecha_cierre": cierre.date().isoformat() if cierre else None,
             "proveedores_adjudicados": proveedores,
-            "url": URL_FICHA.format(codigo=codigo),      # el link lo arma el código, no Claude
+            "url": URL_FICHA.format(codigo=codigo_),      # el link lo arma el código, no Claude
         })
     return resultados
 
@@ -151,7 +151,7 @@ def ejecutar(bloque) -> dict:
         resultado = EJECUTORES[bloque.name](**bloque.input)
         contenido = resultado if isinstance(resultado, str) else json.dumps(resultado, ensure_ascii=False)
         return {"type": "tool_result", "tool_use_id": bloque.id, "content": contenido}
-    except Exception as error:
+    except Exception as error:  # noqa: BLE001 — a propósito: cualquier fallo de una herramienta vuelve a Claude
         # El error se le devuelve a Claude (puede corregir o avisar); el programa no se cae.
         return {"type": "tool_result", "tool_use_id": bloque.id, "is_error": True,
                 "content": f"Error al ejecutar {bloque.name}: {type(error).__name__}: {error}"}

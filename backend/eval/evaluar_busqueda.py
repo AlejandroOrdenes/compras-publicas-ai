@@ -22,7 +22,14 @@ from pathlib import Path
 import psycopg
 
 from app.config import settings
-from scripts.buscar_normativa import CANDIDATOS, CANTIDAD, candidatos, deduplicar, fusionar, vectorizar
+from scripts.buscar_normativa import (
+    CANDIDATOS,
+    CANTIDAD,
+    candidatos,
+    deduplicar,
+    fusionar,
+    vectorizar,
+)
 from scripts.reescribir_pregunta import reescribir
 
 PAUTA = Path(__file__).parent / "preguntas.json"

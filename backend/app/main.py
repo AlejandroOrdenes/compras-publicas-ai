@@ -15,8 +15,14 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from langgraph.errors import GraphRecursionError
 
 from app.config import settings
-from app.schemas import (ErrorDetalle, Fuente, PasoAgente, PreguntaEntrada,
-                         RespuestaAgente, RespuestaRAG)
+from app.schemas import (
+    ErrorDetalle,
+    Fuente,
+    PasoAgente,
+    PreguntaEntrada,
+    RespuestaAgente,
+    RespuestaRAG,
+)
 from scripts import agente_langgraph
 from scripts.preguntar import NOMBRES, responder
 

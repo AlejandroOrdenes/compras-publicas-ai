@@ -31,7 +31,7 @@ from langgraph.graph import END, START, MessagesState, StateGraph
 from langgraph.prebuilt import ToolNode, tools_condition
 
 from app.config import settings
-from scripts import agente as a      # herramientas e instrucciones del agente a mano
+from scripts import agente as a  # herramientas e instrucciones del agente a mano
 
 MAX_VUELTAS = 6
 # Cada vuelta = 2 pasos del grafo (modelo + herramientas); +1 por la respuesta final.

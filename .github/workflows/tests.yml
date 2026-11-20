@@ -1,0 +1,47 @@
+# CI: en cada push o pull request, GitHub prende una máquina Linux limpia,
+# instala el backend y corre el linter (ruff) y los tests (pytest).
+# Si algo falla, el commit queda marcado con ✗ en GitHub.
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10          # si algo se cuelga, no consume minutos sin fin
+
+    defaults:
+      run:
+        working-directory: backend
+
+    # app/config.py exige estas variables al importar la app. Los tests usan mocks
+    # (no llaman a Claude, Voyage, Postgres ni Mercado Público), así que bastan
+    # valores falsos: ninguna clave real sale de tu computador.
+    env:
+      DATABASE_URL: postgresql://ci:ci@localhost:5432/ci
+      VOYAGE_API_KEY: falsa-para-ci
+      ANTHROPIC_API_KEY: falsa-para-ci
+      MERCADOPUBLICO_TICKET: falsa-para-ci
+
+    steps:
+      - name: Descargar el código
+        uses: actions/checkout@v4
+
+      - name: Instalar Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip                                   # reusa las librerías entre corridas
+          cache-dependency-path: backend/requirements*.txt
+
+      - name: Instalar dependencias
+        run: pip install -r requirements-dev.txt
+
+      - name: Linter (ruff)
+        run: ruff check .
+
+      - name: Tests (pytest)
+        run: python -m pytest -v
