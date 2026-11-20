@@ -18,6 +18,7 @@ import sys
 
 import psycopg
 import voyageai
+from langsmith import traceable
 
 from app.config import settings
 from scripts.indexar_normativa import MODELO
@@ -39,6 +40,15 @@ LIMIT %s
 """
 
 
+# Para LangSmith: una fila de la base → algo legible (sin el texto completo del artículo).
+def _filas_legibles(filas: list[tuple]) -> dict:
+    return {"articulos": [f"{f[0]} art. {f[1]}{' (transitorio)' if f[2] else ''} | similitud {f[4]:.3f}"
+                          for f in filas]}
+
+
+# process_outputs: en vez de guardar 1.024 números por vector (ilegible), guarda solo cuántos hubo.
+@traceable(name="vectorizar", run_type="embedding",
+           process_outputs=lambda vectores: {"vectores": len(vectores)})
 def vectorizar(textos: list[str]) -> list[str]:
     """Convierte textos en vectores con UNA sola llamada a Voyage."""
     vo = voyageai.Client(api_key=settings.voyage_api_key)
@@ -115,6 +125,7 @@ def completar(conn, filas: list[tuple]) -> list[tuple]:
     return completas
 
 
+@traceable(name="buscar", run_type="retriever", process_outputs=_filas_legibles)
 def buscar(pregunta: str, cantidad: int = CANTIDAD, reescribir: bool = True,
            completo: bool = True) -> list[tuple]:
     """Devuelve los `cantidad` artículos distintos más relevantes para la pregunta.

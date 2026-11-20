@@ -9,6 +9,8 @@ Claude responde citando los artículos.
 import sys
 
 import anthropic
+from langsmith import traceable
+from langsmith.wrappers import wrap_anthropic
 
 from app.config import settings
 from scripts.buscar_normativa import buscar
@@ -42,6 +44,13 @@ def armar_contexto(articulos: list[tuple]) -> str:
     return "\n\n".join(bloques)
 
 
+def _resumen_respuesta(r: dict) -> dict:
+    """Qué guardar en LangSmith como salida: sin repetir los artículos enteros (ya salen en 'buscar')."""
+    return {**r, "articulos": [f"{fila[0]} art. {fila[1]}" for fila in r["articulos"]]}
+
+
+# Raíz de la traza: todo lo que pase adentro (reescribir, buscar, Opus) cuelga de aquí.
+@traceable(name="responder", process_outputs=_resumen_respuesta)
 def responder(pregunta: str) -> dict:
     """Busca los artículos, se los pasa a Claude y devuelve todo lo que pasó.
 
@@ -53,7 +62,7 @@ def responder(pregunta: str) -> dict:
     """
     articulos = buscar(pregunta, CANTIDAD_ARTICULOS)
 
-    client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+    client = wrap_anthropic(anthropic.Anthropic(api_key=settings.anthropic_api_key))
     respuesta = client.beta.messages.create(
         model=MODELO,
         max_tokens=16000,

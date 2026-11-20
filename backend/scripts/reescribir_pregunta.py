@@ -14,6 +14,8 @@ nunca se cae por culpa de este paso.
 import sys
 
 import anthropic
+from langsmith import traceable
+from langsmith.wrappers import wrap_anthropic
 
 from app.config import settings
 
@@ -31,8 +33,11 @@ Reglas:
 - Devuelve SOLO la pregunta traducida, en una línea y con no más de 25 palabras."""
 
 
+@traceable(name="reescribir")   # LangSmith: registra este paso (entrada, salida, tiempo)
 def reescribir(pregunta: str) -> str:
-    client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+    # wrap_anthropic "envuelve" al cliente: cada llamada a Claude queda registrada
+    # con modelo, tokens y costo, sin cambiar nada más del código.
+    client = wrap_anthropic(anthropic.Anthropic(api_key=settings.anthropic_api_key))
     try:
         respuesta = client.messages.create(
             model=MODELO,
