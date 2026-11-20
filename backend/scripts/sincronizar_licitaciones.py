@@ -4,6 +4,7 @@ Ejecutar desde la carpeta backend, con el venv activo y Docker corriendo:
     python -m scripts.sincronizar_licitaciones                    ← 50 licitaciones de hoy (desarrollo)
     python -m scripts.sincronizar_licitaciones --limite 0         ← todas las de hoy (~1.400; correr de noche)
     python -m scripts.sincronizar_licitaciones --fecha 18112026   ← otra fecha (ddmmaaaa)
+    python -m scripts.sincronizar_licitaciones --existentes --limite 0  ← re-consultar las ya guardadas
 
 Reglas de la API (chilecompra.cl/api): 10.000 consultas al día por ticket; excederlo
 o eludirlo = suspensión. ChileCompra pide descargas masivas entre 22:00 y 07:00.
@@ -12,7 +13,8 @@ y un tope por corrida.
 
 Datos personales: LISTA BLANCA. Solo se copian los campos elegidos en `extraer()`;
 nombres, cargos, emails y teléfonos de funcionarios nunca se guardan.
-Los textos libres pasan por scripts/filtro_datos_personales.limpiar().
+Los textos libres pasan por scripts/filtro_datos_personales.limpiar(), y el proveedor
+adjudicado por proveedor_publico() (empresa = público; persona natural = protegido).
 """
 import argparse
 import json
@@ -23,7 +25,7 @@ import httpx
 import psycopg
 
 from app.config import settings
-from scripts.filtro_datos_personales import limpiar
+from scripts.filtro_datos_personales import limpiar, proveedor_publico
 
 BASE = "https://api.mercadopublico.cl/servicios/v1/publico/licitaciones.json"
 PAUSA = 2.0             # segundos entre consultas
@@ -111,7 +113,9 @@ def extraer(lic: dict) -> dict:
             "cantidad": item.get("Cantidad"),
             "unidad": item.get("UnidadMedida"),
             "monto_unitario_adjudicado": (item.get("Adjudicacion") or {}).get("MontoUnitario"),
-            # Proveedor adjudicado (nombre/RUT): fuera por ahora; puede ser persona natural (paso 4.3).
+            # Proveedor: nombre y RUT si es empresa; "Persona natural (dato protegido)" si no.
+            **proveedor_publico((item.get("Adjudicacion") or {}).get("RutProveedor"),
+                                (item.get("Adjudicacion") or {}).get("NombreProveedor")),
         }
         for item in (lic.get("Items") or {}).get("Listado") or []
     ]
@@ -139,18 +143,27 @@ def main():
     parser = argparse.ArgumentParser(description="Sincroniza licitaciones de Mercado Público a Postgres")
     parser.add_argument("--fecha", default=date.today().strftime("%d%m%Y"), help="ddmmaaaa (por defecto: hoy)")
     parser.add_argument("--limite", type=int, default=50, help="cuántas licitaciones (0 = todas)")
+    parser.add_argument("--existentes", action="store_true",
+                        help="volver a consultar las licitaciones que ya están guardadas (ignora --fecha)")
     args = parser.parse_args()
 
     inicio = time.time()
     api = ApiMercadoPublico()
-    lista = api.consultar(fecha=args.fecha)
-    if lista is None:
-        print("No se pudo obtener la lista de licitaciones.")
-        return
-    codigos = [lic["CodigoExterno"] for lic in lista["Listado"]]
+    if args.existentes:
+        # Ponerse al día: cambios de estado (Publicada → Adjudicada) o campos nuevos.
+        with psycopg.connect(settings.database_url) as conn:
+            codigos = [fila[0] for fila in conn.execute("SELECT codigo FROM licitaciones ORDER BY codigo")]
+        print(f"Re-sincronizando {len(codigos)} licitaciones ya guardadas.")
+    else:
+        lista = api.consultar(fecha=args.fecha)
+        if lista is None:
+            print("No se pudo obtener la lista de licitaciones.")
+            return
+        codigos = [lic["CodigoExterno"] for lic in lista["Listado"]]
+        print(f"{lista['Cantidad']} licitaciones el {args.fecha}.")
     if args.limite:
         codigos = codigos[:args.limite]
-    print(f"{lista['Cantidad']} licitaciones el {args.fecha}; sincronizando {len(codigos)}.")
+    print(f"Sincronizando {len(codigos)}.")
 
     guardadas, fallidas = 0, []
     with psycopg.connect(settings.database_url) as conn:

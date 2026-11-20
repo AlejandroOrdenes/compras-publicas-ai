@@ -54,6 +54,26 @@ def limpiar(texto: str | None) -> str | None:
     return texto
 
 
+# ---------- Proveedor adjudicado: empresa (público) o persona natural (protegido) ----------
+
+# Regla práctica chilena: el RUT de las personas se asigna por orden de nacimiento
+# (hoy ~20-30 millones); el de las empresas (personas jurídicas) va sobre 50 millones.
+# Caso borde aceptado: una EIRL tiene RUT de empresa y su nombre suele ser el de una
+# persona ("Juan Pérez EIRL"), pero ese nombre ya es público como razón social.
+RUT_MINIMO_EMPRESA = 50_000_000
+PERSONA_NATURAL = "Persona natural (dato protegido)"
+
+
+def proveedor_publico(rut: str | None, nombre: str | None) -> dict:
+    """Devuelve {"proveedor", "rut_proveedor"}: completos si es empresa, protegidos si es persona."""
+    numero = re.sub(r"\D", "", (rut or "").split("-")[0])   # "76.123.456-7" → "76123456"
+    if not numero:
+        return {"proveedor": None, "rut_proveedor": None}     # ítem aún no adjudicado
+    if int(numero) >= RUT_MINIMO_EMPRESA:
+        return {"proveedor": nombre, "rut_proveedor": rut}
+    return {"proveedor": PERSONA_NATURAL, "rut_proveedor": None}
+
+
 def contar(texto: str | None) -> dict[str, int]:
     """Cuántos datos de cada tipo hay en un texto (para verificar sin imprimirlos)."""
     texto = texto or ""

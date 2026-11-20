@@ -5,7 +5,7 @@ pytest busca funciones que empiezan con test_ y revisa cada `assert`
 """
 import pytest
 
-from scripts.filtro_datos_personales import limpiar
+from scripts.filtro_datos_personales import PERSONA_NATURAL, limpiar, proveedor_publico
 
 # @pytest.mark.parametrize = correr el mismo test con varios casos (como test.each en Jest).
 
@@ -54,3 +54,20 @@ def test_no_tapa_lo_que_no_es_personal(texto):
 def test_vacio_y_none():
     assert limpiar("") == ""
     assert limpiar(None) is None
+
+
+# ---------- Proveedor adjudicado ----------
+
+@pytest.mark.parametrize("rut, nombre, esperado", [
+    # Empresa (RUT >= 50 millones): se guarda tal cual
+    ("76.123.456-7", "Servicios Ejemplo SpA", {"proveedor": "Servicios Ejemplo SpA", "rut_proveedor": "76.123.456-7"}),
+    ("96543210-K", "Ejemplo S.A.", {"proveedor": "Ejemplo S.A.", "rut_proveedor": "96543210-K"}),
+    # Persona natural (RUT < 50 millones): protegido
+    ("12.345.678-9", "Juan Pérez", {"proveedor": PERSONA_NATURAL, "rut_proveedor": None}),
+    ("9.876.543-2", "María Soto", {"proveedor": PERSONA_NATURAL, "rut_proveedor": None}),
+    # Sin adjudicar
+    (None, None, {"proveedor": None, "rut_proveedor": None}),
+    ("", "", {"proveedor": None, "rut_proveedor": None}),
+])
+def test_proveedor_publico(rut, nombre, esperado):
+    assert proveedor_publico(rut, nombre) == esperado
