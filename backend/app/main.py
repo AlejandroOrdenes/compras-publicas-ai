@@ -11,7 +11,7 @@ import anthropic
 import psycopg
 import voyageai.error
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from langgraph.errors import GraphRecursionError
 
 from app.config import settings
@@ -32,9 +32,11 @@ ERRORES_DEPENDENCIAS = {
 app = FastAPI(title="Compras Públicas AI")
 
 
-@app.get("/")
+# Quien entre a la URL base llega directo a la documentación interactiva.
+# include_in_schema=False: no aparece en /docs (no es parte de la API, es solo una puerta).
+@app.get("/", include_in_schema=False)
 def root():
-    return {"app": "compras-publicas-ai", "status": "ok"}
+    return RedirectResponse("/docs")
 
 
 @app.get("/health")
