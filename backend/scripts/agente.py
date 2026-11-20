@@ -57,7 +57,7 @@ HERRAMIENTAS = [
                 "texto": {"type": "string",
                           "description": "Palabras a buscar en el nombre, la descripción y los ítems. Ej: 'aseo', 'computadores'."},
                 "region": {"type": "string", "description": "Parte del nombre de la región. Ej: 'Valparaíso', 'Metropolitana'."},
-                "estado": {"type": "string", "enum": ["Publicada", "Cerrada", "Adjudicada", "Desierta"]},
+                "estado": {"type": "string", "enum": ["Publicada", "Cerrada", "Adjudicada", "Desierta", "Revocada"]},
                 "organismo": {"type": "string", "description": "Parte del nombre del organismo comprador. Ej: 'Municipalidad'."},
                 "monto_min": {"type": "number", "description": "Monto estimado mínimo, en pesos."},
                 "monto_max": {"type": "number", "description": "Monto estimado máximo, en pesos."},

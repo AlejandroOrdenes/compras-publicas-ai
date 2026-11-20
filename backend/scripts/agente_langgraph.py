@@ -47,7 +47,7 @@ LIMITE_PASOS = MAX_VUELTAS * 2 + 1
 # 'Publicada' | 'Cerrada' | ...).
 @tool(parse_docstring=True)
 def buscar_licitaciones(texto: str | None = None, region: str | None = None,
-                        estado: Literal["Publicada", "Cerrada", "Adjudicada", "Desierta"] | None = None,
+                        estado: Literal["Publicada", "Cerrada", "Adjudicada", "Desierta", "Revocada"] | None = None,
                         organismo: str | None = None, monto_min: float | None = None,
                         monto_max: float | None = None, limite: int = 10, codigo: str | None = None) -> list[dict]:
     """Busca licitaciones de Mercado Público guardadas en la base de datos (una muestra, no todas las de Chile).
