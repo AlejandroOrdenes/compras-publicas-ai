@@ -25,7 +25,7 @@ import sys
 from typing import Literal
 
 from langchain_anthropic import ChatAnthropic
-from langchain_core.messages import SystemMessage
+from langchain_core.messages import SystemMessage, ToolMessage
 from langchain_core.tools import tool
 from langgraph.graph import END, START, MessagesState, StateGraph
 from langgraph.prebuilt import ToolNode, tools_condition
@@ -49,7 +49,7 @@ LIMITE_PASOS = MAX_VUELTAS * 2 + 1
 def buscar_licitaciones(texto: str | None = None, region: str | None = None,
                         estado: Literal["Publicada", "Cerrada", "Adjudicada", "Desierta"] | None = None,
                         organismo: str | None = None, monto_min: float | None = None,
-                        monto_max: float | None = None, limite: int = 10) -> list[dict]:
+                        monto_max: float | None = None, limite: int = 10, codigo: str | None = None) -> list[dict]:
     """Busca licitaciones de Mercado Público guardadas en la base de datos (una muestra, no todas las de Chile).
 
     Úsala cuando pregunten por licitaciones, compras concretas, organismos que compran algo, montos,
@@ -64,8 +64,9 @@ def buscar_licitaciones(texto: str | None = None, region: str | None = None,
         monto_min: monto estimado mínimo, en pesos.
         monto_max: monto estimado máximo, en pesos.
         limite: cuántas devolver (1 a 20).
+        codigo: código exacto de una licitación. Ej: '1048-75-LE26'.
     """
-    return a.buscar_licitaciones(texto, region, estado, organismo, monto_min, monto_max, limite)
+    return a.buscar_licitaciones(texto, region, estado, organismo, monto_min, monto_max, limite, codigo)
 
 
 @tool(parse_docstring=True)
@@ -109,6 +110,13 @@ def construir_grafo():
     return grafo.compile()
 
 
+def _llamadas(mensajes) -> list[dict]:
+    resultados = {m.tool_call_id: m.content for m in mensajes if isinstance(m, ToolMessage)}
+    return [{"herramienta": llamada["name"], "argumentos": llamada["args"],
+             "resultado": resultados.get(llamada["id"], "")}
+            for m in mensajes if getattr(m, "tool_calls", None) for llamada in m.tool_calls]
+
+
 def preguntar(pregunta: str) -> dict:
     grafo = construir_grafo()
     estado = grafo.invoke(
@@ -122,6 +130,9 @@ def preguntar(pregunta: str) -> dict:
     return {
         "texto": mensajes[-1].text,                  # .text = solo el texto (sin bloques de razonamiento)
         "pasos": pasos,
+        # Cada llamada a herramienta: nombre, argumentos y lo que devolvió (lo usa la evaluación).
+        # El pedido (tool_call, en el mensaje de Claude) y su resultado (ToolMessage) se unen por id.
+        "llamadas": _llamadas(mensajes),
         "llamadas_a_claude": len(uso),
         "tokens_entrada": sum(u["input_tokens"] for u in uso),
         "tokens_salida": sum(u["output_tokens"] for u in uso),

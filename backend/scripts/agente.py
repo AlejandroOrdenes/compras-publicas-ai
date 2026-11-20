@@ -62,6 +62,7 @@ HERRAMIENTAS = [
                 "monto_min": {"type": "number", "description": "Monto estimado mínimo, en pesos."},
                 "monto_max": {"type": "number", "description": "Monto estimado máximo, en pesos."},
                 "limite": {"type": "integer", "description": "Cuántas devolver (1 a 20; por defecto 10)."},
+                "codigo": {"type": "string", "description": "Código exacto de una licitación. Ej: '1048-75-LE26'."},
             },
         },
     },
@@ -100,6 +101,7 @@ WHERE (%(texto)s::text IS NULL OR
   AND (%(organismo)s::text IS NULL OR unaccent(organismo) ILIKE unaccent('%%' || %(organismo)s || '%%'))
   AND (%(monto_min)s::numeric IS NULL OR monto_estimado >= %(monto_min)s)
   AND (%(monto_max)s::numeric IS NULL OR monto_estimado <= %(monto_max)s)
+  AND (%(codigo)s::text IS NULL OR upper(codigo) = upper(trim(%(codigo)s)))
 ORDER BY fecha_publicacion DESC NULLS LAST
 LIMIT %(limite)s
 """
@@ -107,9 +109,9 @@ LIMIT %(limite)s
 
 @traceable(name="buscar_licitaciones", run_type="tool")
 def buscar_licitaciones(texto=None, region=None, estado=None, organismo=None,
-                        monto_min=None, monto_max=None, limite=10) -> list[dict]:
+                        monto_min=None, monto_max=None, limite=10, codigo=None) -> list[dict]:
     parametros = {"texto": texto, "region": region, "estado": estado, "organismo": organismo,
-                  "monto_min": monto_min, "monto_max": monto_max,
+                  "monto_min": monto_min, "monto_max": monto_max, "codigo": codigo,
                   "limite": max(1, min(int(limite or 10), 20))}
     with psycopg.connect(settings.database_url) as conn:
         conn.execute("CREATE EXTENSION IF NOT EXISTS unaccent")
