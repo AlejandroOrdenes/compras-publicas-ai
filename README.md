@@ -2,7 +2,7 @@
 
 **AI copilot for small businesses that sell to the Chilean government.** Describe your company in plain words and it finds the open public tenders (Mercado Público / ChileCompra) that fit you, explains what each one requires, flags the risks and cites the procurement law that applies.
 
-**Live demo: [licitaciones.labnomade.com](https://licitaciones.labnomade.com)** (UI in Spanish, built for the Chilean market)
+**Live demo: [licitaciones.aordenes.com](https://licitaciones.aordenes.com)** (UI in Spanish, built for the Chilean market)
 
 ![Dashboard](docs/img/panel.jpg)
 
@@ -22,7 +22,7 @@
 
 ```mermaid
 flowchart LR
-    U[Browser] --> CF[CloudFront<br/>licitaciones.labnomade.com]
+    U[Browser] --> CF[CloudFront<br/>licitaciones.aordenes.com]
     CF -->|static site| S3[(S3<br/>Next.js export)]
     CF -->|/api/* signed with OAC| API[Lambda: FastAPI API<br/>private Function URL]
     API --> DB[(RDS PostgreSQL<br/>+ pgvector)]
